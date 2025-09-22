@@ -14,6 +14,9 @@ app = Flask(__name__)
 # Simple in-memory cache to track processed messages with timestamps
 processed_messages = {}
 
+# Store user language preferences (user_id -> language_code)
+user_language_preferences = {}
+
 
 def cleanup_old_messages():
     """Remove messages older than 1 hour from the cache"""
@@ -29,6 +32,28 @@ def cleanup_old_messages():
         del processed_messages[message_id]
 
     print(f"Cleaned up {len(messages_to_remove)} old messages from cache")
+
+
+def extract_language_prefix(text):
+    """Extract language prefix from text and return (language_code, cleaned_text, is_preference_setting)"""
+    language_prefixes = {
+        '/yoruba': 'yo',
+        '/igbo': 'ig',
+        '/hausa': 'ha'
+    }
+
+    text_lower = text.lower().strip()
+    for prefix, lang_code in language_prefixes.items():
+        if text_lower.startswith(prefix):
+            # Remove the prefix and any whitespace after it
+            cleaned_text = text[len(prefix):].strip()
+
+            # If there's no text after the prefix, it's a preference setting
+            is_preference_setting = len(cleaned_text) == 0
+
+            return lang_code, cleaned_text, is_preference_setting
+
+    return None, text, False
 
 
 def is_low_quality_transcription(transcription):
@@ -212,39 +237,70 @@ def webhook():
                                 detected_language = ""
                                 best_confidence = 0
 
-                                # Try each language and find the best result
-                                for lang_code in languages_to_try:
+                                # Check if user has a language preference set
+                                user_preferred_language = user_language_preferences.get(
+                                    sender)
+
+                                if user_preferred_language:
+                                    # User has specified a language preference, use it directly
+                                    print(
+                                        f"Using user's preferred language: {language_names[user_preferred_language]} ({user_preferred_language})")
                                     try:
-                                        print(
-                                            f"Trying transcription with language: {language_names[lang_code]} ({lang_code})")
                                         response = client.speech.transcribe(
-                                            language=lang_code, content=audio_content)
+                                            language=user_preferred_language, content=audio_content)
                                         transcription = response.text.strip()
 
                                         if transcription and len(transcription) > 0:
-                                            # Check if this transcription is low quality/noise
-                                            if is_low_quality_transcription(transcription):
-                                                print(
-                                                    f"  {language_names[lang_code]}: Low quality transcription detected, skipping")
-                                                continue
-
-                                            # Simple heuristic: longer transcription with actual words might be better
-                                            # You could also use confidence scores if available in the response
-                                            # Word count as confidence metric
-                                            confidence = len(
-                                                transcription.split())
-                                            print(
-                                                f"  {language_names[lang_code]}: '{transcription}' (confidence: {confidence})")
-
-                                            if confidence > best_confidence:
+                                            if not is_low_quality_transcription(transcription):
                                                 best_transcription = transcription
-                                                detected_language = lang_code
-                                                best_confidence = confidence
+                                                detected_language = user_preferred_language
+                                                best_confidence = len(
+                                                    transcription.split())
+                                                print(
+                                                    f"Transcription with preferred language: '{transcription}'")
+                                            else:
+                                                print(
+                                                    "Low quality transcription detected with preferred language")
 
                                     except Exception as lang_error:
                                         print(
-                                            f"  Error with {language_names[lang_code]}: {str(lang_error)}")
-                                        continue
+                                            f"Error transcribing with preferred language {language_names[user_preferred_language]}: {str(lang_error)}")
+
+                                # If no user preference or transcription failed, try all languages
+                                if not best_transcription:
+                                    # Try each language and find the best result
+                                    for lang_code in languages_to_try:
+                                        try:
+                                            print(
+                                                f"Trying transcription with language: {language_names[lang_code]} ({lang_code})")
+                                            response = client.speech.transcribe(
+                                                language=lang_code, content=audio_content)
+                                            transcription = response.text.strip()
+
+                                            if transcription and len(transcription) > 0:
+                                                # Check if this transcription is low quality/noise
+                                                if is_low_quality_transcription(transcription):
+                                                    print(
+                                                        f"  {language_names[lang_code]}: Low quality transcription detected, skipping")
+                                                    continue
+
+                                                # Simple heuristic: longer transcription with actual words might be better
+                                                # You could also use confidence scores if available in the response
+                                                # Word count as confidence metric
+                                                confidence = len(
+                                                    transcription.split())
+                                                print(
+                                                    f"  {language_names[lang_code]}: '{transcription}' (confidence: {confidence})")
+
+                                                if confidence > best_confidence:
+                                                    best_transcription = transcription
+                                                    detected_language = lang_code
+                                                    best_confidence = confidence
+
+                                        except Exception as lang_error:
+                                            print(
+                                                f"  Error with {language_names[lang_code]}: {str(lang_error)}")
+                                            continue
 
                                 if not best_transcription:
                                     print(
@@ -357,6 +413,52 @@ def webhook():
                             print(
                                 f"Processing text message from {sender} (message_id: {message_id}): '{text_content}'")
 
+                            # Check for language prefix
+                            specified_language, cleaned_text, is_preference_setting = extract_language_prefix(
+                                text_content)
+
+                            # If this is just a language preference setting (e.g., "/igbo")
+                            if is_preference_setting and specified_language:
+                                user_language_preferences[sender] = specified_language
+                                language_names = {
+                                    'yo': 'Yoruba',
+                                    'ig': 'Igbo',
+                                    'ha': 'Hausa'
+                                }
+                                response_message = f"Language preference set to {language_names[specified_language]}. Your next audio messages will be transcribed in {language_names[specified_language]}."
+
+                                # Send response via WhatsApp
+                                whatsapp_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+                                response_data = {
+                                    "messaging_product": "whatsapp",
+                                    "to": sender,
+                                    "text": {
+                                        "body": response_message
+                                    }
+                                }
+                                send_response = requests.post(
+                                    whatsapp_url,
+                                    headers={
+                                        'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}',
+                                        'Content-Type': 'application/json'
+                                    },
+                                    json=response_data
+                                )
+
+                                if send_response.status_code == 200:
+                                    print(
+                                        f"Language preference set for user {sender}: {language_names[specified_language]}")
+                                    return jsonify({"status": "success"}), 200
+                                else:
+                                    print(f"Response: {send_response.text}")
+                                    print(f"Request URL: {whatsapp_url}")
+                                    print(f"Request data: {response_data}")
+                                    print(
+                                        f"Request headers: Authorization: Bearer {os.getenv('WHATSAPP_API_TOKEN')[:20]}...")
+                                    return jsonify({"status": "error", "message": "Failed to send WhatsApp response"}), 500
+                                    print(
+                                        f"Failed to send WhatsApp response. Status: {send_response.status_code}")
+
                             # Set up Spitch client for translation
                             spitch_api_key = os.getenv("SPITCH_API_KEY")
                             if not spitch_api_key:
@@ -368,10 +470,6 @@ def webhook():
                             os.environ["SPITCH_API_KEY"] = spitch_api_key
                             client = Spitch()
 
-                            # Auto-detect language and translate to English if needed
-                            # Try to detect if the text is in an African language
-                            # Yoruba, Igbo, Hausa
-                            languages_to_try = ['yo', 'ig', 'ha']
                             language_names = {
                                 'yo': 'Yoruba',
                                 'ig': 'Igbo',
@@ -379,39 +477,68 @@ def webhook():
                                 'en': 'English'
                             }
 
-                            response_message = f"Text: {text_content}"
+                            response_message = f"Text: {cleaned_text}"
 
-                            # Try to translate from each African language to English
-                            translation_found = False
-                            for lang_code in languages_to_try:
+                            if specified_language:
+                                # User specified a language, translate directly
                                 try:
                                     print(
-                                        f"Trying translation from {language_names[lang_code]} to English...")
+                                        f"User specified {language_names[specified_language]}, translating to English...")
                                     translation_response = client.text.translate(
-                                        text=text_content,
-                                        source=lang_code,
+                                        text=cleaned_text,
+                                        source=specified_language,
                                         target="en"
                                     )
                                     english_translation = translation_response.text.strip()
 
-                                    # If translation is significantly different from original, it's likely correct
-                                    if english_translation and english_translation.lower() != text_content.lower():
-                                        response_message = f"Text ({language_names[lang_code]}): {text_content}\n\nEnglish translation: {english_translation}"
+                                    if english_translation:
+                                        response_message = f"Text ({language_names[specified_language]}): {cleaned_text}\n\nEnglish translation: {english_translation}"
                                         print(
-                                            f"Translation from {language_names[lang_code]}: {english_translation}")
-                                        translation_found = True
-                                        break
+                                            f"Translation from {language_names[specified_language]}: {english_translation}")
+                                    else:
+                                        response_message = f"Text ({language_names[specified_language]}): {cleaned_text}\n\nTranslation failed"
 
                                 except Exception as translation_error:
                                     print(
-                                        f"Translation from {language_names[lang_code]} failed: {str(translation_error)}")
-                                    continue
+                                        f"Translation from {language_names[specified_language]} failed: {str(translation_error)}")
+                                    response_message = f"Text ({language_names[specified_language]}): {cleaned_text}\n\nTranslation error: {str(translation_error)}"
+                            else:
+                                # Auto-detect language and translate to English if needed
+                                # Try to detect if the text is in an African language
+                                # Yoruba, Igbo, Hausa
+                                languages_to_try = ['yo', 'ig', 'ha']
 
-                            # If no translation was found, assume it's already in English
-                            if not translation_found:
-                                response_message = f"Text (English): {text_content}"
-                                print(
-                                    "Text appears to be in English, no translation needed")
+                                # Try to translate from each African language to English
+                                translation_found = False
+                                for lang_code in languages_to_try:
+                                    try:
+                                        print(
+                                            f"Trying translation from {language_names[lang_code]} to English...")
+                                        translation_response = client.text.translate(
+                                            text=cleaned_text,
+                                            source=lang_code,
+                                            target="en"
+                                        )
+                                        english_translation = translation_response.text.strip()
+
+                                        # If translation is significantly different from original, it's likely correct
+                                        if english_translation and english_translation.lower() != cleaned_text.lower():
+                                            response_message = f"Text ({language_names[lang_code]}): {cleaned_text}\n\nEnglish translation: {english_translation}"
+                                            print(
+                                                f"Translation from {language_names[lang_code]}: {english_translation}")
+                                            translation_found = True
+                                            break
+
+                                    except Exception as translation_error:
+                                        print(
+                                            f"Translation from {language_names[lang_code]} failed: {str(translation_error)}")
+                                        continue
+
+                                # If no translation was found, assume it's already in English
+                                if not translation_found:
+                                    response_message = f"Text (English): {cleaned_text}"
+                                    print(
+                                        "Text appears to be in English, no translation needed")
 
                             # Send response via WhatsApp
                             whatsapp_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
