@@ -3,3 +3,5 @@
 
 # Virtual environment
 .venv/
+
+.voice_note.ogg

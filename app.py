@@ -48,15 +48,38 @@ def webhook():
                             }
 
                             # First, get the media URL
+                            print(
+                                f"Attempting to get media info from: {media_url}")
+                            print(
+                                f"Using headers: Authorization Bearer {os.getenv('WHATSAPP_API_TOKEN')[:20]}...")
+
                             media_info_response = requests.get(
                                 media_url, headers=headers)
+
+                            print(
+                                f"Media info response status: {media_info_response.status_code}")
+                            print(
+                                f"Media info response headers: {dict(media_info_response.headers)}")
+
                             if media_info_response.status_code != 200:
                                 print(
                                     f"Failed to get media URL. Status: {media_info_response.status_code}")
                                 print(f"Response: {media_info_response.text}")
-                                return jsonify({"status": "error", "message": "Failed to get media URL"}), 500
+
+                                # Try to parse the error response
+                                try:
+                                    error_data = media_info_response.json()
+                                    error_message = error_data.get(
+                                        'error', {}).get('message', 'Unknown error')
+                                    print(
+                                        f"WhatsApp API Error: {error_message}")
+                                    return jsonify({"status": "error", "message": f"WhatsApp API Error: {error_message}"}), 500
+                                except:
+                                    return jsonify({"status": "error", "message": f"Failed to get media URL (Status: {media_info_response.status_code})"}), 500
 
                             media_info = media_info_response.json()
+                            print(f"Media info response: {media_info}")
+
                             if 'url' not in media_info:
                                 print(f"No URL in media info: {media_info}")
                                 return jsonify({"status": "error", "message": "No media URL found"}), 500
@@ -90,21 +113,93 @@ def webhook():
                                 os.environ["SPITCH_API_KEY"] = spitch_api_key
                                 client = Spitch()
 
-                                # Read the audio file and transcribe
+                                # Read the audio file
                                 with open(audio_file, "rb") as f:
                                     audio_content = f.read()
                                     print(
                                         f"Transcribing audio file: {audio_file}")
 
-                                    # Use 'en' for English transcription (you can modify this based on your needs)
-                                    response = client.speech.transcribe(
-                                        language='en', content=audio_content)
-                                    transcription = response.text
-                                    print(f"Transcription: {transcription}")
+                                # List of languages to try (African languages first, then English)
+                                # Yoruba, Igbo, Hausa, English
+                                languages_to_try = ['yo', 'ig', 'ha', 'en']
+                                language_names = {
+                                    'yo': 'Yoruba',
+                                    'ig': 'Igbo',
+                                    'ha': 'Hausa',
+                                    'en': 'English'
+                                }
 
-                                if not transcription:
-                                    print("No transcription result received")
+                                best_transcription = ""
+                                detected_language = ""
+                                best_confidence = 0
+
+                                # Try each language and find the best result
+                                for lang_code in languages_to_try:
+                                    try:
+                                        print(
+                                            f"Trying transcription with language: {language_names[lang_code]} ({lang_code})")
+                                        response = client.speech.transcribe(
+                                            language=lang_code, content=audio_content)
+                                        transcription = response.text.strip()
+
+                                        if transcription and len(transcription) > 0:
+                                            # Simple heuristic: longer transcription with actual words might be better
+                                            # You could also use confidence scores if available in the response
+                                            # Word count as confidence metric
+                                            confidence = len(
+                                                transcription.split())
+                                            print(
+                                                f"  {language_names[lang_code]}: '{transcription}' (confidence: {confidence})")
+
+                                            if confidence > best_confidence:
+                                                best_transcription = transcription
+                                                detected_language = lang_code
+                                                best_confidence = confidence
+
+                                    except Exception as lang_error:
+                                        print(
+                                            f"  Error with {language_names[lang_code]}: {str(lang_error)}")
+                                        continue
+
+                                if not best_transcription:
+                                    print(
+                                        "No successful transcription from any language")
                                     return jsonify({"status": "error", "message": "No transcription result"}), 500
+
+                                print(
+                                    f"Best transcription in {language_names[detected_language]}: '{best_transcription}'")
+
+                                # Prepare response message
+                                if detected_language == 'en':
+                                    # If English was detected, just return the transcription
+                                    response_message = f"Transcription ({language_names[detected_language]}): {best_transcription}"
+                                else:
+                                    # If African language was detected, show both original and English translation
+                                    response_message = f"Transcription ({language_names[detected_language]}): {best_transcription}"
+
+                                    # Translate the transcribed text to English
+                                    try:
+                                        print(
+                                            f"Translating '{best_transcription}' from {detected_language} to English...")
+                                        translation_response = client.text.translate(
+                                            text=best_transcription,
+                                            source=detected_language,
+                                            target="en"
+                                        )
+                                        english_translation = translation_response.text.strip()
+                                        if english_translation:
+                                            response_message += f"\n\nEnglish translation: {english_translation}"
+                                            print(
+                                                f"Translation result: {english_translation}")
+                                        else:
+                                            print(
+                                                "Translation returned empty result")
+                                    except Exception as translation_error:
+                                        print(
+                                            f"Could not translate text: {str(translation_error)}")
+                                        response_message += f"\n\n(Translation unavailable: {str(translation_error)})"
+
+                                transcription = response_message
 
                             except Exception as e:
                                 print(
