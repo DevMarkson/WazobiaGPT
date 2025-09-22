@@ -5,9 +5,25 @@ from dotenv import load_dotenv
 import json
 from spitch import Spitch
 import time
+from pydub import AudioSegment
+from pydub.utils import which
+import tempfile
+import subprocess
+import sys
 
 # Load environment variables
 load_dotenv()
+
+# Configure ffmpeg for pydub
+try:
+    import imageio_ffmpeg as ffmpeg
+    ffmpeg_path = ffmpeg.get_ffmpeg_exe()
+    AudioSegment.converter = ffmpeg_path
+    AudioSegment.ffmpeg = ffmpeg_path
+    AudioSegment.ffprobe = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    print(f"Configured ffmpeg from imageio-ffmpeg: {ffmpeg_path}")
+except Exception as e:
+    print(f"Could not configure imageio-ffmpeg: {e}")
 
 app = Flask(__name__)
 
@@ -35,7 +51,7 @@ def cleanup_old_messages():
 
 
 def extract_language_prefix(text):
-    """Extract language prefix from text and return (language_code, cleaned_text, is_preference_setting)"""
+    """Extract language prefix from text and return (language_code, cleaned_text, is_preference_setting, is_tts_request)"""
     language_prefixes = {
         '/yoruba': 'yo',
         '/igbo': 'ig',
@@ -43,7 +59,27 @@ def extract_language_prefix(text):
         '/english': 'en'
     }
 
+    # Check for TTS commands first
+    tts_commands = ['/tts', '/speak']
     text_lower = text.lower().strip()
+
+    for tts_cmd in tts_commands:
+        if text_lower.startswith(tts_cmd):
+            # Remove the TTS command
+            remaining_text = text[len(tts_cmd):].strip()
+
+            # Check if a language is specified after TTS command
+            for prefix, lang_code in language_prefixes.items():
+                lang_name = prefix[1:]  # Remove the '/' from prefix
+                if remaining_text.lower().startswith(lang_name):
+                    # Remove the language name and get the text to convert
+                    text_to_convert = remaining_text[len(lang_name):].strip()
+                    return lang_code, text_to_convert, False, True
+
+            # No specific language mentioned, default to English for TTS
+            return 'en', remaining_text, False, True
+
+    # Check for regular language prefixes (for transcription/translation)
     for prefix, lang_code in language_prefixes.items():
         if text_lower.startswith(prefix):
             # Remove the prefix and any whitespace after it
@@ -52,9 +88,138 @@ def extract_language_prefix(text):
             # If there's no text after the prefix, it's a preference setting
             is_preference_setting = len(cleaned_text) == 0
 
-            return lang_code, cleaned_text, is_preference_setting
+            return lang_code, cleaned_text, is_preference_setting, False
 
-    return None, text, False
+    return None, text, False, False
+
+
+def configure_ffmpeg():
+    """Configure ffmpeg path for pydub"""
+    try:
+        import imageio_ffmpeg as ffmpeg
+        ffmpeg_path = ffmpeg.get_ffmpeg_exe()
+        AudioSegment.converter = ffmpeg_path
+        AudioSegment.ffmpeg = ffmpeg_path
+        AudioSegment.ffprobe = ffmpeg_path.replace("ffmpeg", "ffprobe")
+        print(f"Using ffmpeg from imageio-ffmpeg: {ffmpeg_path}")
+        return True
+    except ImportError:
+        print("imageio-ffmpeg not available")
+        return False
+    except Exception as e:
+        print(f"Error configuring ffmpeg: {e}")
+        return False
+
+
+def convert_wav_to_compatible_format(wav_filename):
+    """Try multiple methods to convert WAV to WhatsApp-compatible format"""
+
+    # First, try to configure ffmpeg
+    ffmpeg_configured = configure_ffmpeg()
+
+    # Method 1: Try pydub with configured ffmpeg
+    if ffmpeg_configured:
+        try:
+            print("Attempting conversion with pydub and imageio-ffmpeg...")
+            audio = AudioSegment.from_wav(wav_filename)
+            mp3_filename = wav_filename.replace('.wav', '.mp3')
+            audio.export(mp3_filename, format="mp3", bitrate="128k")
+
+            if os.path.exists(mp3_filename):
+                print(f"Successfully converted to MP3: {mp3_filename}")
+                return mp3_filename, "audio/mpeg"
+        except Exception as e:
+            print(f"Pydub with imageio-ffmpeg conversion failed: {e}")
+
+    # Method 2: Try pydub without specific ffmpeg configuration (fallback)
+    try:
+        print("Attempting conversion with default pydub...")
+        audio = AudioSegment.from_wav(wav_filename)
+        mp3_filename = wav_filename.replace('.wav', '.mp3')
+        audio.export(mp3_filename, format="mp3", bitrate="128k")
+
+        if os.path.exists(mp3_filename):
+            return mp3_filename, "audio/mpeg"
+    except Exception as e:
+        print(f"Default pydub conversion failed: {e}")
+
+    # Method 3: Try converting to OGG using pydub (simpler conversion)
+    try:
+        print("Attempting conversion to OGG...")
+        audio = AudioSegment.from_wav(wav_filename)
+        ogg_filename = wav_filename.replace('.wav', '.ogg')
+        audio.export(ogg_filename, format="ogg")
+
+        if os.path.exists(ogg_filename):
+            return ogg_filename, "audio/ogg"
+    except Exception as e:
+        print(f"OGG conversion failed: {e}")
+
+    # If all conversions fail, return None to indicate failure
+    print("All conversion methods failed")
+    return None, None
+
+
+def generate_speech_audio(text, language_code, client):
+    """Generate speech audio using Spitch API and convert to MP3 if possible"""
+    # Voice mapping for each language
+    voice_mapping = {
+        'yo': 'sade',      # Yoruba voice
+        'ig': 'ngozi',     # Igbo voice (updated to available voice)
+        'ha': 'amina',     # Hausa voice
+        'en': 'lucy',      # English voice (updated to available voice)
+        'am': 'selam'      # Amharic voice (updated to available voice)
+    }
+
+    # Default to English voice
+    voice = voice_mapping.get(language_code, 'lucy')
+
+    try:
+        print(
+            f"Generating speech for text: '{text}' in language: {language_code} with voice: {voice}")
+
+        # Generate speech with Spitch (returns WAV format)
+        response = client.speech.generate(
+            text=text,
+            language=language_code,
+            voice=voice
+        )
+
+        # Create temporary WAV file
+        temp_wav_filename = f"temp_tts_{int(time.time())}.wav"
+        with open(temp_wav_filename, "wb") as f:
+            f.write(response.read())
+
+        # Try to convert to WhatsApp-compatible format
+        converted_filename, content_type = convert_wav_to_compatible_format(
+            temp_wav_filename)
+
+        if converted_filename and os.path.exists(converted_filename):
+            # Conversion successful
+            try:
+                os.remove(temp_wav_filename)
+            except Exception as cleanup_error:
+                print(
+                    f"Warning: Could not remove temp file {temp_wav_filename}: {cleanup_error}")
+
+            print(
+                f"Speech generated and converted successfully: {converted_filename}")
+            return converted_filename, content_type
+        else:
+            # All conversions failed - we cannot use WAV as WhatsApp doesn't support it
+            # Clean up and return None to indicate failure
+            try:
+                os.remove(temp_wav_filename)
+            except Exception as cleanup_error:
+                print(
+                    f"Warning: Could not remove temp file {temp_wav_filename}: {cleanup_error}")
+
+            print("Failed to convert audio to WhatsApp-compatible format")
+            return None, None
+
+    except Exception as e:
+        print(f"Error generating speech: {str(e)}")
+        return None
 
 
 def is_low_quality_transcription(transcription):
@@ -415,8 +580,136 @@ def webhook():
                                 f"Processing text message from {sender} (message_id: {message_id}): '{text_content}'")
 
                             # Check for language prefix
-                            specified_language, cleaned_text, is_preference_setting = extract_language_prefix(
+                            specified_language, cleaned_text, is_preference_setting, is_tts_request = extract_language_prefix(
                                 text_content)
+
+                            # Handle TTS request
+                            if is_tts_request:
+                                if not cleaned_text:
+                                    response_message = "Please provide text after the TTS command. Example: '/tts yoruba Hello world' or '/speak How are you?'"
+                                else:
+                                    # Set up Spitch client
+                                    spitch_api_key = os.getenv(
+                                        "SPITCH_API_KEY")
+                                    if not spitch_api_key:
+                                        print(
+                                            "SPITCH_API_KEY is not set in environment variables")
+                                        return jsonify({"status": "error", "message": "Spitch API key not configured"}), 500
+
+                                    os.environ["SPITCH_API_KEY"] = spitch_api_key
+                                    client = Spitch()
+
+                                    # Initialize audio_filename to prevent reference errors
+                                    audio_filename = None
+
+                                    # Generate speech
+                                    result = generate_speech_audio(
+                                        cleaned_text, specified_language, client)
+
+                                    if result:
+                                        audio_filename, content_type = result
+                                        # Upload audio to WhatsApp and send
+                                        try:
+                                            # First, upload the media to WhatsApp
+                                            upload_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/media"
+
+                                            with open(audio_filename, 'rb') as audio_file:
+                                                files = {
+                                                    'file': (audio_filename, audio_file, content_type),
+                                                }
+                                                data = {
+                                                    'type': 'audio',
+                                                    'messaging_product': 'whatsapp'
+                                                }
+                                                headers = {
+                                                    'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}'
+                                                }
+
+                                                upload_response = requests.post(
+                                                    upload_url, headers=headers, data=data, files=files)
+
+                                                if upload_response.status_code == 200:
+                                                    media_data = upload_response.json()
+                                                    media_id = media_data['id']
+                                                    print(
+                                                        f"Audio uploaded successfully. Media ID: {media_id}")
+
+                                                    # Send the audio message
+                                                    whatsapp_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+                                                    response_data = {
+                                                        "messaging_product": "whatsapp",
+                                                        "to": sender,
+                                                        "type": "audio",
+                                                        "audio": {
+                                                            "id": media_id
+                                                        }
+                                                    }
+
+                                                    send_response = requests.post(
+                                                        whatsapp_url,
+                                                        headers={
+                                                            'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}',
+                                                            'Content-Type': 'application/json'
+                                                        },
+                                                        json=response_data
+                                                    )
+
+                                                    if send_response.status_code == 200:
+                                                        print(
+                                                            "Audio message sent successfully via TTS")
+                                                        # Clean up the temporary audio file
+                                                        os.remove(
+                                                            audio_filename)
+                                                        return jsonify({"status": "success"}), 200
+                                                    else:
+                                                        print(
+                                                            f"Failed to send audio message. Status: {send_response.status_code}")
+                                                        print(
+                                                            f"Response: {send_response.text}")
+                                                        return jsonify({"status": "error", "message": "Failed to send audio message"}), 500
+                                                else:
+                                                    print(
+                                                        f"Failed to upload audio. Status: {upload_response.status_code}")
+                                                    print(
+                                                        f"Response: {upload_response.text}")
+                                                    return jsonify({"status": "error", "message": "Failed to upload audio"}), 500
+
+                                        except Exception as upload_error:
+                                            print(
+                                                f"Error uploading/sending audio: {str(upload_error)}")
+                                            return jsonify({"status": "error", "message": f"Upload error: {str(upload_error)}"}), 500
+                                        finally:
+                                            # Clean up the temporary audio file with better error handling
+                                            if audio_filename and os.path.exists(audio_filename):
+                                                try:
+                                                    os.remove(audio_filename)
+                                                    print(
+                                                        f"Cleaned up audio file: {audio_filename}")
+                                                except Exception as cleanup_error:
+                                                    print(
+                                                        f"Warning: Could not clean up audio file {audio_filename}: {str(cleanup_error)}")
+                                    else:
+                                        response_message = "Failed to convert speech to WhatsApp-compatible audio format. Please ensure ffmpeg is installed on the system."
+
+                                # Send text response if not sending audio
+                                if not (is_tts_request and cleaned_text and audio_filename):
+                                    whatsapp_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+                                    response_data = {
+                                        "messaging_product": "whatsapp",
+                                        "to": sender,
+                                        "text": {
+                                            "body": response_message
+                                        }
+                                    }
+                                    send_response = requests.post(
+                                        whatsapp_url,
+                                        headers={
+                                            'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}',
+                                            'Content-Type': 'application/json'
+                                        },
+                                        json=response_data
+                                    )
+                                    return jsonify({"status": "success"}), 200
 
                             # If this is just a language preference setting (e.g., "/igbo")
                             if is_preference_setting and specified_language:
