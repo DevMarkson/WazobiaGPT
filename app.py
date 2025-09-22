@@ -31,6 +31,51 @@ def cleanup_old_messages():
     print(f"Cleaned up {len(messages_to_remove)} old messages from cache")
 
 
+def is_low_quality_transcription(transcription):
+    """Check if transcription appears to be low quality/noise"""
+    if not transcription or len(transcription.strip()) == 0:
+        return True
+
+    words = transcription.split()
+
+    # Too few words (likely noise)
+    if len(words) < 2:
+        return True
+
+    # Check for excessive repetition
+    unique_words = set(words)
+    repetition_ratio = len(
+        words) / len(unique_words) if len(unique_words) > 0 else 0
+
+    # If more than 70% of the words are repetitive, it's likely noise
+    if repetition_ratio > 5:
+        print(f"High repetition detected: {repetition_ratio:.1f}x average")
+        return True
+
+    # Check for very long transcriptions with repetitive patterns (like the Igbo example)
+    if len(words) > 50:
+        # Look for patterns like "mmepe, mmepe, mmepe" or "na-enwe mmetụta"
+        word_frequency = {}
+        for word in words:
+            word_frequency[word] = word_frequency.get(word, 0) + 1
+
+        # If any single word appears more than 30% of the time in a long text, it's likely noise
+        max_frequency = max(word_frequency.values()) if word_frequency else 0
+        if max_frequency > len(words) * 0.3:
+            print(
+                f"Single word dominance detected: {max_frequency}/{len(words)} words")
+            return True
+
+    # Check for very short repetitive words that are likely artifacts
+    short_repetitive_words = [word for word in words if len(word) <= 3]
+    if len(short_repetitive_words) > len(words) * 0.7:  # More than 70% very short words
+        print(
+            f"Too many short words: {len(short_repetitive_words)}/{len(words)}")
+        return True
+
+    return False
+
+
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
@@ -177,6 +222,12 @@ def webhook():
                                         transcription = response.text.strip()
 
                                         if transcription and len(transcription) > 0:
+                                            # Check if this transcription is low quality/noise
+                                            if is_low_quality_transcription(transcription):
+                                                print(
+                                                    f"  {language_names[lang_code]}: Low quality transcription detected, skipping")
+                                                continue
+
                                             # Simple heuristic: longer transcription with actual words might be better
                                             # You could also use confidence scores if available in the response
                                             # Word count as confidence metric
@@ -199,6 +250,12 @@ def webhook():
                                     print(
                                         "No successful transcription from any language")
                                     return jsonify({"status": "error", "message": "No transcription result"}), 500
+
+                                # Final quality check on the best transcription
+                                if is_low_quality_transcription(best_transcription):
+                                    print(
+                                        f"Best transcription failed quality check: '{best_transcription[:100]}...'")
+                                    return jsonify({"status": "error", "message": "Audio quality too poor for transcription"}), 400
 
                                 print(
                                     f"Best transcription in {language_names[detected_language]}: '{best_transcription}'")
@@ -278,7 +335,116 @@ def webhook():
                             print(f"Error processing audio message: {str(e)}")
                             return jsonify({"status": "error", "message": str(e)}), 500
 
-            return jsonify({"status": "no audio found"}), 200
+                    elif message.get('type') == 'text':
+                        try:
+                            # Clean up old messages periodically
+                            if len(processed_messages) > 100:
+                                cleanup_old_messages()
+
+                            # Get text content and sender
+                            text_content = message['text']['body']
+                            sender = message['from']
+                            message_id = message['id']
+
+                            # Check if we've already processed this message
+                            if message_id in processed_messages:
+                                print(
+                                    f"Text message {message_id} already processed, skipping...")
+                                return jsonify({"status": "already processed"}), 200
+
+                            # Add message to processed set with current timestamp
+                            processed_messages[message_id] = time.time()
+                            print(
+                                f"Processing text message from {sender} (message_id: {message_id}): '{text_content}'")
+
+                            # Set up Spitch client for translation
+                            spitch_api_key = os.getenv("SPITCH_API_KEY")
+                            if not spitch_api_key:
+                                print(
+                                    "SPITCH_API_KEY is not set in environment variables")
+                                return jsonify({"status": "error", "message": "Spitch API key not configured"}), 500
+
+                            # Set the API key in environment (required by Spitch SDK)
+                            os.environ["SPITCH_API_KEY"] = spitch_api_key
+                            client = Spitch()
+
+                            # Auto-detect language and translate to English if needed
+                            # Try to detect if the text is in an African language
+                            # Yoruba, Igbo, Hausa
+                            languages_to_try = ['yo', 'ig', 'ha']
+                            language_names = {
+                                'yo': 'Yoruba',
+                                'ig': 'Igbo',
+                                'ha': 'Hausa',
+                                'en': 'English'
+                            }
+
+                            response_message = f"Text: {text_content}"
+
+                            # Try to translate from each African language to English
+                            translation_found = False
+                            for lang_code in languages_to_try:
+                                try:
+                                    print(
+                                        f"Trying translation from {language_names[lang_code]} to English...")
+                                    translation_response = client.text.translate(
+                                        text=text_content,
+                                        source=lang_code,
+                                        target="en"
+                                    )
+                                    english_translation = translation_response.text.strip()
+
+                                    # If translation is significantly different from original, it's likely correct
+                                    if english_translation and english_translation.lower() != text_content.lower():
+                                        response_message = f"Text ({language_names[lang_code]}): {text_content}\n\nEnglish translation: {english_translation}"
+                                        print(
+                                            f"Translation from {language_names[lang_code]}: {english_translation}")
+                                        translation_found = True
+                                        break
+
+                                except Exception as translation_error:
+                                    print(
+                                        f"Translation from {language_names[lang_code]} failed: {str(translation_error)}")
+                                    continue
+
+                            # If no translation was found, assume it's already in English
+                            if not translation_found:
+                                response_message = f"Text (English): {text_content}"
+                                print(
+                                    "Text appears to be in English, no translation needed")
+
+                            # Send response via WhatsApp
+                            whatsapp_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+                            response_data = {
+                                "messaging_product": "whatsapp",
+                                "to": sender,
+                                "text": {
+                                    "body": response_message
+                                }
+                            }
+                            send_response = requests.post(
+                                whatsapp_url,
+                                headers={
+                                    'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}',
+                                    'Content-Type': 'application/json'
+                                },
+                                json=response_data
+                            )
+
+                            if send_response.status_code != 200:
+                                print(
+                                    f"Failed to send WhatsApp response. Status: {send_response.status_code}")
+                                print(f"Response: {send_response.text}")
+                                return jsonify({"status": "error", "message": "Failed to send WhatsApp response"}), 500
+
+                            print("Successfully processed text and sent response")
+                            return jsonify({"status": "success"}), 200
+
+                        except Exception as e:
+                            print(f"Error processing text message: {str(e)}")
+                            return jsonify({"status": "error", "message": str(e)}), 500
+
+            return jsonify({"status": "no audio or text found"}), 200
 
         except Exception as e:
             print(f"Error processing webhook: {str(e)}")
