@@ -39,7 +39,8 @@ def extract_language_prefix(text):
     language_prefixes = {
         '/yoruba': 'yo',
         '/igbo': 'ig',
-        '/hausa': 'ha'
+        '/hausa': 'ha',
+        '/english': 'en'
     }
 
     text_lower = text.lower().strip()
@@ -423,7 +424,8 @@ def webhook():
                                 language_names = {
                                     'yo': 'Yoruba',
                                     'ig': 'Igbo',
-                                    'ha': 'Hausa'
+                                    'ha': 'Hausa',
+                                    'en': 'English'
                                 }
                                 response_message = f"Language preference set to {language_names[specified_language]}. Your next audio messages will be transcribed in {language_names[specified_language]}."
 
