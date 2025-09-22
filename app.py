@@ -4,11 +4,31 @@ import os
 from dotenv import load_dotenv
 import json
 from spitch import Spitch
+import time
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
+
+# Simple in-memory cache to track processed messages with timestamps
+processed_messages = {}
+
+
+def cleanup_old_messages():
+    """Remove messages older than 1 hour from the cache"""
+    current_time = time.time()
+    one_hour_ago = current_time - 3600  # 3600 seconds = 1 hour
+
+    messages_to_remove = []
+    for message_id, timestamp in processed_messages.items():
+        if timestamp < one_hour_ago:
+            messages_to_remove.append(message_id)
+
+    for message_id in messages_to_remove:
+        del processed_messages[message_id]
+
+    print(f"Cleaned up {len(messages_to_remove)} old messages from cache")
 
 
 @app.route('/webhook', methods=['GET', 'POST'])
@@ -35,11 +55,25 @@ def webhook():
                 for message in messages:
                     if message.get('type') == 'audio':
                         try:
+                            # Clean up old messages periodically
+                            if len(processed_messages) > 100:
+                                cleanup_old_messages()
+
                             # Get media ID and sender
                             media_id = message['audio']['id']
                             sender = message['from']
+                            message_id = message['id']
+
+                            # Check if we've already processed this message
+                            if message_id in processed_messages:
+                                print(
+                                    f"Message {message_id} already processed, skipping...")
+                                return jsonify({"status": "already processed"}), 200
+
+                            # Add message to processed set with current timestamp
+                            processed_messages[message_id] = time.time()
                             print(
-                                f"Processing audio message {media_id} from {sender}")
+                                f"Processing audio message {media_id} from {sender} (message_id: {message_id})")
 
                             # Get media URL
                             media_url = f"https://graph.facebook.com/v22.0/{media_id}"
