@@ -652,8 +652,8 @@ def test_spitch():
         if not spitch_api_key:
             return jsonify({"status": "error", "message": "SPITCH_API_KEY not set"}), 500
 
-        os.environ["SPITCH_API_KEY"] = spitch_api_key
-        client = Spitch()
+        # Initialize Spitch client with API key
+        client = Spitch(api_key=spitch_api_key)
 
         # Try a simple translation test
         test_text = "Hello world"
@@ -794,9 +794,8 @@ def webhook():
                                         "SPITCH_API_KEY is not set in environment variables")
                                     return jsonify({"status": "error", "message": "Spitch API key not configured"}), 500
 
-                                # Set the API key in environment (required by Spitch SDK)
-                                os.environ["SPITCH_API_KEY"] = spitch_api_key
-                                client = Spitch()
+                                # Initialize Spitch client with API key
+                                client = Spitch(api_key=spitch_api_key)
                                 print("Spitch client initialized successfully")
 
                                 # Read the audio file
@@ -1134,8 +1133,8 @@ def webhook():
                                             "SPITCH_API_KEY is not set in environment variables")
                                         return jsonify({"status": "error", "message": "Spitch API key not configured"}), 500
 
-                                    os.environ["SPITCH_API_KEY"] = spitch_api_key
-                                    client = Spitch()
+                                    # Initialize Spitch client with API key
+                                    client = Spitch(api_key=spitch_api_key)
 
                                     # Initialize audio_filename to prevent reference errors
                                     audio_filename = None
@@ -1305,10 +1304,9 @@ def webhook():
                                     "SPITCH_API_KEY is not set in environment variables")
                                 return jsonify({"status": "error", "message": "Spitch API key not configured"}), 500
 
-                            # Set the API key in environment (required by Spitch SDK)
-                            os.environ["SPITCH_API_KEY"] = spitch_api_key
+                            # Initialize Spitch client with API key
                             try:
-                                client = Spitch()
+                                client = Spitch(api_key=spitch_api_key)
                                 print(
                                     "Text translation - Spitch client initialized successfully")
                             except Exception as client_error:
