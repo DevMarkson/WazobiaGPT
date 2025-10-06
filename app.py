@@ -716,7 +716,7 @@ def webhook():
                                 "messaging_product": "whatsapp",
                                 "to": sender,
                                 "text": {
-                                    "body": f"Transcription: {transcription}"
+                                    "body": transcription
                                 }
                             }
                             send_response = requests.post(
