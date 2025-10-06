@@ -4,4 +4,9 @@
 # Virtual environment
 .venv/
 
+# User data files (should not be shared)
+welcomed_users.json
+user_preferences.json
+
+# Temporary audio files
 .voice_note.ogg

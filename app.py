@@ -79,8 +79,36 @@ def save_user_preferences(preferences):
         print(f"Error saving preferences: {e}")
 
 
-# Load existing preferences on startup
+def load_welcomed_users():
+    """Load list of users who have been welcomed"""
+    try:
+        welcomed_file = '/tmp/welcomed_users.json' if os.path.exists(
+            '/tmp') else 'welcomed_users.json'
+        if os.path.exists(welcomed_file):
+            with open(welcomed_file, 'r') as f:
+                welcomed = json.load(f)
+                print(f"Loaded {len(welcomed)} welcomed users from file")
+                return set(welcomed)
+    except Exception as e:
+        print(f"Error loading welcomed users: {e}")
+    return set()
+
+
+def save_welcomed_users(welcomed_users):
+    """Save list of welcomed users to file"""
+    try:
+        welcomed_file = '/tmp/welcomed_users.json' if os.path.exists(
+            '/tmp') else 'welcomed_users.json'
+        with open(welcomed_file, 'w') as f:
+            json.dump(list(welcomed_users), f)
+            print(f"Saved {len(welcomed_users)} welcomed users to file")
+    except Exception as e:
+        print(f"Error saving welcomed users: {e}")
+
+
+# Load existing preferences and welcomed users on startup
 user_language_preferences = load_user_preferences()
+welcomed_users = load_welcomed_users()
 
 
 def enhance_igbo_text_with_diacritics(text):
@@ -112,11 +140,11 @@ def enhance_igbo_text_with_diacritics(text):
         'onwa': 'ọnwa',        # moon
         'kpakpando': 'kpakpando',  # star
     }
-
+    
     # Convert to lowercase for matching, but preserve original case
     words = text.split()
     enhanced_words = []
-
+    
     for word in words:
         # Remove punctuation for matching
         clean_word = word.lower().strip('.,!?;:')
@@ -128,7 +156,7 @@ def enhance_igbo_text_with_diacritics(text):
                 enhanced = enhanced.upper()
             elif word.istitle():
                 enhanced = enhanced.capitalize()
-
+            
             # Add back punctuation
             punctuation = ''
             for char in word[::-1]:
@@ -139,8 +167,221 @@ def enhance_igbo_text_with_diacritics(text):
             enhanced_words.append(enhanced + punctuation)
         else:
             enhanced_words.append(word)
-
+    
     return ' '.join(enhanced_words)
+
+
+def enhance_yoruba_text_with_diacritics(text):
+    """Add proper Yoruba diacritics to common words"""
+    yoruba_word_map = {
+        'bawo': 'Báwo',        # How
+        'ni': 'ni',            # is/are
+        'se': 'ṣe',            # to do/make
+        'omo': 'ọmọ',          # child
+        'oko': 'ọkọ',          # husband/vehicle
+        'ile': 'ilé',          # house
+        'eko': 'Èkó',          # Lagos
+        'oba': 'ọba',          # king
+        'oye': 'òye',          # title/position
+        'ire': 'ire',          # good/blessing
+        'aje': 'àjẹ',          # wealth/witch
+        'owo': 'owó',          # money
+        'ori': 'orí',          # head/destiny
+        'emi': 'èmi',          # I/me
+        'iwo': 'ìwọ',          # you
+        'awa': 'àwa',          # we
+        'eyin': 'ẹ̀yin',        # you (plural)
+        'won': 'wọn',          # they
+        'ti': 'tí',            # of/from
+        'si': 'sí',            # to/at
+        'fun': 'fún',          # for
+        'ni': 'ní',            # at/in
+        'pe': 'pé',            # that/to call
+        'ki': 'kí',            # to/let
+        'ma': 'má',            # don't
+        'ko': 'kò',            # not
+        'da': 'dá',            # to create/pour
+        'wa': 'wá',            # to come/to be
+        'lo': 'lọ',            # to go
+        'gbo': 'gbọ́',          # to hear
+        'ri': 'rí',            # to see
+        'je': 'jẹ',            # to eat/to be
+        'mu': 'mú',            # to drink/to take
+        'sun': 'sùn',          # to sleep
+        'dide': 'dìde',        # to stand up
+        'joko': 'jókòó',       # to sit
+    }
+    
+    # Convert to lowercase for matching, but preserve original case
+    words = text.split()
+    enhanced_words = []
+    
+    for word in words:
+        # Remove punctuation for matching
+        clean_word = word.lower().strip('.,!?;:')
+        if clean_word in yoruba_word_map:
+            # Replace with enhanced version, preserving punctuation
+            enhanced = yoruba_word_map[clean_word]
+            # Preserve original case pattern
+            if word.isupper():
+                enhanced = enhanced.upper()
+            elif word.istitle():
+                enhanced = enhanced.capitalize()
+            
+            # Add back punctuation
+            punctuation = ''
+            for char in word[::-1]:
+                if char in '.,!?;:':
+                    punctuation = char + punctuation
+                else:
+                    break
+            enhanced_words.append(enhanced + punctuation)
+        else:
+            enhanced_words.append(word)
+    
+    return ' '.join(enhanced_words)
+def get_welcome_message():
+    """Generate welcome message for new users"""
+    return """🤖 Welcome to Spitch Translator Bot! 
+
+I can help you with:
+
+🎯 SET LANGUAGE PREFERENCE:
+• /yoruba - Set Yoruba as default
+• /igbo - Set Igbo as default
+• /hausa - Set Hausa as default
+• /english - Set English as default
+
+🎤 AUDIO FEATURES:
+• Send voice notes - Auto transcribe & translate
+• /speak [text] - Text to speech in your set language
+  Example: /speak Báwo ni (How are you in Yoruba)
+
+💬 TEXT TRANSLATION:
+• Set a language preference first, then send any text
+• I'll automatically translate it for you!
+
+📋 OTHER COMMANDS:
+• /help - Show this help message
+• /commands - Show all available commands
+• /reset - Clear your language preference
+
+Just send me text or voice messages and I'll help translate them! 🌍"""
+
+
+def get_help_message():
+    """Generate detailed help message"""
+    return """🎤WAZOBIA TRANSLATOR BOT HELP
+
+🌍 SUPPORTED LANGUAGES:
+• Yoruba (yo) - /yoruba
+• Igbo (ig) - /igbo  
+• Hausa (ha) - /hausa
+• English (en) - /english
+
+🎯 SET LANGUAGE PREFERENCE:
+   /yoruba → Sets Yoruba as your default
+   /igbo → Sets Igbo as your default
+   
+💬 TEXT TRANSLATION:
+   1. Set language preference: /yoruba
+   2. Send text: "Báwo ni"
+   3. Get: "Text (Yoruba): Báwo ni
+      English translation: How are you"
+
+🎤 VOICE FEATURES:
+• Send voice notes → Auto transcribe + translate
+• Voice notes use your set language preference
+• Supports Yoruba, Igbo, Hausa and English
+• Other Nigerian languages coming soon!
+
+
+🔊 TEXT-TO-SPEECH:
+• /speak [text] → Voice in your set language
+  Examples:
+  - Set /yoruba, then /speak Báwo ni
+  - Set /igbo, then /speak Ndeewo
+  - Set /hausa, then /speak Sannu
+
+⚙️ SETTINGS COMMANDS:
+• /help - This help message
+• /commands - Quick command list  
+• /reset - Clear language preference
+• /status - Check your current settings
+
+Just send me text or voice messages and I'll help translate them! 🤗"""
+
+
+def get_commands_list():
+    """Generate quick commands reference"""
+    return """⚡ QUICK COMMANDS REFERENCE
+
+🎯 LANGUAGE PREFERENCES:
+/yoruba - Set Yoruba default
+/igbo - Set Igbo default  
+/hausa - Set Hausa default
+/english - Set English default
+
+� TEXT-TO-SPEECH:
+/speak [text] - Generate speech in your set language
+  Example: /speak Báwo ni (after setting /yoruba)
+
+🎤 AUDIO FEATURES:
+• Send voice notes - Auto transcribe & translate
+• Uses your language preference
+
+ℹ️ INFO COMMANDS:
+/help - Detailed help
+/commands - This list
+/status - Your settings
+/reset - Clear preferences
+
+💬 Set language preference, then send text or voice! 🌍"""
+
+
+def get_status_message(sender):
+    """Generate user status message"""
+    user_preference = user_language_preferences.get(sender)
+    language_names = {
+        'yo': 'Yoruba',
+        'ig': 'Igbo',
+        'ha': 'Hausa',
+        'en': 'English'
+    }
+
+    if user_preference:
+        lang_name = language_names.get(user_preference, 'Unknown')
+        return f"""📊 YOUR CURRENT SETTINGS
+
+🎯 Default Language: {lang_name} ({user_preference})
+✅ Status: Active
+
+Your text and voice messages will be processed in {lang_name} unless you specify otherwise.
+
+To change: Send /{lang_name.lower()} to set a new preference
+To clear: Send /reset"""
+    else:
+        return """📊 YOUR CURRENT SETTINGS
+
+🎯 Default Language: Not set
+⚪ Status: Auto-detect mode
+
+I'll try to detect your language automatically. For better accuracy, set a default language:
+
+/yoruba - Set Yoruba as default
+/igbo - Set Igbo as default
+/hausa - Set Hausa as default  
+/english - Set English as default"""
+
+
+def send_welcome_to_new_user(sender):
+    """Send welcome message to new users"""
+    # Check if user has been welcomed before
+    if sender not in welcomed_users:
+        welcomed_users.add(sender)
+        save_welcomed_users(welcomed_users)
+        return True
+    return False
 
 
 def cleanup_old_messages():
@@ -169,7 +410,7 @@ def extract_language_prefix(text):
     }
 
     # Check for TTS commands first
-    tts_commands = ['/tts', '/speak']
+    tts_commands = ['/speak']
     text_lower = text.lower().strip()
 
     for tts_cmd in tts_commands:
@@ -185,8 +426,8 @@ def extract_language_prefix(text):
                     text_to_convert = remaining_text[len(lang_name):].strip()
                     return lang_code, text_to_convert, False, True
 
-            # No specific language mentioned, default to English for TTS
-            return 'en', remaining_text, False, True
+            # No specific language mentioned, use default behavior
+            return None, remaining_text, False, True
 
     # Check for regular language prefixes (for transcription/translation)
     for prefix, lang_code in language_prefixes.items():
@@ -763,6 +1004,76 @@ def webhook():
                             print(
                                 f"Processing text message from {sender} (message_id: {message_id}): '{text_content}'")
 
+                            # Check for help and info commands first
+                            text_lower = text_content.lower().strip()
+
+                            # Handle help commands
+                            if text_lower in ['/help', 'help', '/h']:
+                                response_message = get_help_message()
+                            elif text_lower in ['/commands', '/cmd', 'commands']:
+                                response_message = get_commands_list()
+                            elif text_lower in ['/status', 'status']:
+                                response_message = get_status_message(sender)
+                            elif text_lower in ['/reset', 'reset']:
+                                if sender in user_language_preferences:
+                                    del user_language_preferences[sender]
+                                    save_user_preferences(
+                                        user_language_preferences)
+                                    response_message = "✅ Language preference cleared! I'll now auto-detect languages for your messages.\n\nTo set a new preference, use:\n/yoruba /igbo /hausa /english"
+                                else:
+                                    response_message = "ℹ️ You don't have any language preference set. Use /help to see available commands."
+                            elif text_lower in ['/start', 'start', '/welcome', 'welcome']:
+                                response_message = get_welcome_message()
+                            else:
+                                # Check if this is a new user and send welcome
+                                if send_welcome_to_new_user(sender):
+                                    welcome_msg = get_welcome_message()
+                                    # Send welcome message first
+                                    whatsapp_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+                                    welcome_data = {
+                                        "messaging_product": "whatsapp",
+                                        "to": sender,
+                                        "text": {"body": welcome_msg}
+                                    }
+                                    requests.post(
+                                        whatsapp_url,
+                                        headers={
+                                            'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}',
+                                            'Content-Type': 'application/json'
+                                        },
+                                        json=welcome_data
+                                    )
+                                    # Add a small delay before processing the actual message
+                                    time.sleep(1)
+
+                                # Continue with normal processing (existing logic)
+                                response_message = None  # Flag to continue with normal processing
+
+                            # If we have a direct response message, send it and return
+                            if response_message:
+                                whatsapp_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+                                response_data = {
+                                    "messaging_product": "whatsapp",
+                                    "to": sender,
+                                    "text": {"body": response_message}
+                                }
+                                send_response = requests.post(
+                                    whatsapp_url,
+                                    headers={
+                                        'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}',
+                                        'Content-Type': 'application/json'
+                                    },
+                                    json=response_data
+                                )
+                                if send_response.status_code == 200:
+                                    print(
+                                        f"Info command response sent to {sender}")
+                                    return jsonify({"status": "success"}), 200
+                                else:
+                                    print(
+                                        f"Failed to send info response: {send_response.text}")
+                                    return jsonify({"status": "error", "message": "Failed to send response"}), 500
+
                             # Check for language prefix
                             specified_language, cleaned_text, is_preference_setting, is_tts_request = extract_language_prefix(
                                 text_content)
@@ -795,8 +1106,26 @@ def webhook():
                             # Handle TTS request
                             if is_tts_request:
                                 if not cleaned_text:
-                                    response_message = "Please provide text after the TTS command. Example: '/tts yoruba Hello world' or '/speak How are you?'"
+                                    response_message = "Please provide text after the /speak command. Example: '/speak Báwo ni' (set your language preference first with /yoruba)"
                                 else:
+                                    # If no specific language was provided, use user's preference
+                                    if not specified_language:
+                                        user_preferred_language = user_language_preferences.get(sender)
+                                        if user_preferred_language:
+                                            specified_language = user_preferred_language
+                                            print(f"Using user's language preference for TTS: {specified_language}")
+                                        else:
+                                            response_message = "Please set a language preference first using /yoruba, /igbo, /hausa, or /english, then try /speak again."
+                                            # Send response and return early
+                                            whatsapp_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+                                            response_data = {
+                                                "messaging_product": "whatsapp",
+                                                "to": sender,
+                                                "text": {"body": response_message}
+                                            }
+                                            requests.post(whatsapp_url, headers={'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}', 'Content-Type': 'application/json'}, json=response_data)
+                                            return jsonify({"status": "success"}), 200
+                                    
                                     # Set up Spitch client
                                     spitch_api_key = os.getenv(
                                         "SPITCH_API_KEY")
@@ -1017,13 +1346,18 @@ def webhook():
                                         f"Translation result: '{english_translation}'")
 
                                     if english_translation:
-                                        # Enhance Igbo text with diacritics if it's Igbo
+                                        # Enhance text with diacritics based on language
                                         display_text = cleaned_text
                                         if specified_language == 'ig':
                                             display_text = enhance_igbo_text_with_diacritics(
                                                 cleaned_text)
                                             print(
                                                 f"Enhanced Igbo text: '{display_text}'")
+                                        elif specified_language == 'yo':
+                                            display_text = enhance_yoruba_text_with_diacritics(
+                                                cleaned_text)
+                                            print(
+                                                f"Enhanced Yoruba text: '{display_text}'")
 
                                         response_message = f"Text ({language_names[specified_language]}): {display_text}\n\nEnglish translation: {english_translation}"
                                         print(
@@ -1067,13 +1401,18 @@ def webhook():
 
                                         # If translation is significantly different from original, it's likely correct
                                         if english_translation and english_translation.lower() != cleaned_text.lower():
-                                            # Enhance Igbo text with diacritics if detected as Igbo
+                                            # Enhance text with diacritics based on detected language
                                             display_text = cleaned_text
                                             if lang_code == 'ig':
                                                 display_text = enhance_igbo_text_with_diacritics(
                                                     cleaned_text)
                                                 print(
                                                     f"Enhanced Igbo text in auto-detection: '{display_text}'")
+                                            elif lang_code == 'yo':
+                                                display_text = enhance_yoruba_text_with_diacritics(
+                                                    cleaned_text)
+                                                print(
+                                                    f"Enhanced Yoruba text in auto-detection: '{display_text}'")
 
                                             response_message = f"Text ({language_names[lang_code]}): {display_text}\n\nEnglish translation: {english_translation}"
                                             print(
@@ -1136,5 +1475,14 @@ def webhook():
 
 
 if __name__ == '__main__':
+    print("🤖 Spitch Translator Bot Starting...")
+    print("=" * 50)
+    print("Available Commands:")
+    print("• /help - Show detailed help")
+    print("• /commands - Show quick commands")
+    print("• /yoruba, /igbo, /hausa, /english - Set language preference")
+    print("• Send voice notes or text for translation")
+    print("=" * 50)
+
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
