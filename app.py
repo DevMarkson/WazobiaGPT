@@ -10,9 +10,30 @@ from pydub.utils import which
 import tempfile
 import subprocess
 import sys
+import traceback
 
 # Load environment variables
 load_dotenv()
+
+# Validate required environment variables
+required_env_vars = [
+    'WHATSAPP_API_TOKEN',
+    'WHATSAPP_PHONE_NUMBER_ID',
+    'SPITCH_API_KEY',
+    'WEBHOOK_VERIFY_TOKEN'
+]
+
+missing_vars = []
+for var in required_env_vars:
+    if not os.getenv(var):
+        missing_vars.append(var)
+
+if missing_vars:
+    print(
+        f"ERROR: Missing required environment variables: {', '.join(missing_vars)}")
+    print("Please set these variables in your Railway deployment settings.")
+else:
+    print("All required environment variables are present")
 
 # Configure ffmpeg for pydub
 try:
@@ -30,8 +51,96 @@ app = Flask(__name__)
 # Simple in-memory cache to track processed messages with timestamps
 processed_messages = {}
 
-# Store user language preferences (user_id -> language_code)
-user_language_preferences = {}
+# Persistent storage for user language preferences
+PREFERENCES_FILE = '/tmp/user_preferences.json' if os.path.exists(
+    '/tmp') else 'user_preferences.json'
+
+
+def load_user_preferences():
+    """Load user preferences from file"""
+    try:
+        if os.path.exists(PREFERENCES_FILE):
+            with open(PREFERENCES_FILE, 'r') as f:
+                preferences = json.load(f)
+                print(f"Loaded {len(preferences)} user preferences from file")
+                return preferences
+    except Exception as e:
+        print(f"Error loading preferences: {e}")
+    return {}
+
+
+def save_user_preferences(preferences):
+    """Save user preferences to file"""
+    try:
+        with open(PREFERENCES_FILE, 'w') as f:
+            json.dump(preferences, f)
+            print(f"Saved {len(preferences)} user preferences to file")
+    except Exception as e:
+        print(f"Error saving preferences: {e}")
+
+
+# Load existing preferences on startup
+user_language_preferences = load_user_preferences()
+
+
+def enhance_igbo_text_with_diacritics(text):
+    """Add proper Igbo diacritics to common words"""
+    igbo_word_map = {
+        'chineke': 'Chineke',  # God
+        'ndewo': 'Ndeewo',     # Hello
+        'kedu': 'Kedụ',        # How
+        'ime': 'ịme',          # to do
+        'umu': 'ụmụ',          # children
+        'nwa': 'nwa',          # child
+        'anya': 'anya',        # eye
+        'obi': 'obi',          # heart
+        'ulo': 'ụlọ',          # house
+        'aha': 'aha',          # name
+        'onye': 'onye',        # person
+        'ugbo': 'ụgbọ',        # vehicle
+        'uche': 'uche',        # wisdom/mind
+        'chi': 'chi',          # personal god/destiny
+        'eze': 'eze',          # king
+        'ada': 'ada',          # first daughter
+        'nna': 'nna',          # father
+        'nne': 'nne',          # mother
+        'nwanne': 'nwanne',    # sibling
+        'egwu': 'egwu',        # music/dance
+        'oji': 'ọjị',          # kola nut
+        'mmiri': 'mmiri',      # water
+        'anwu': 'anwụ',        # sun
+        'onwa': 'ọnwa',        # moon
+        'kpakpando': 'kpakpando',  # star
+    }
+
+    # Convert to lowercase for matching, but preserve original case
+    words = text.split()
+    enhanced_words = []
+
+    for word in words:
+        # Remove punctuation for matching
+        clean_word = word.lower().strip('.,!?;:')
+        if clean_word in igbo_word_map:
+            # Replace with enhanced version, preserving punctuation
+            enhanced = igbo_word_map[clean_word]
+            # Preserve original case pattern
+            if word.isupper():
+                enhanced = enhanced.upper()
+            elif word.istitle():
+                enhanced = enhanced.capitalize()
+
+            # Add back punctuation
+            punctuation = ''
+            for char in word[::-1]:
+                if char in '.,!?;:':
+                    punctuation = char + punctuation
+                else:
+                    break
+            enhanced_words.append(enhanced + punctuation)
+        else:
+            enhanced_words.append(word)
+
+    return ' '.join(enhanced_words)
 
 
 def cleanup_old_messages():
@@ -267,6 +376,67 @@ def is_low_quality_transcription(transcription):
     return False
 
 
+@app.route('/debug-preferences', methods=['GET'])
+def debug_preferences():
+    """Debug endpoint to check user language preferences"""
+    return jsonify({
+        "status": "success",
+        "user_preferences": user_language_preferences,
+        "total_users": len(user_language_preferences)
+    }), 200
+
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    env_status = {}
+    required_vars = ['WHATSAPP_API_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID',
+                     'SPITCH_API_KEY', 'WEBHOOK_VERIFY_TOKEN']
+
+    for var in required_vars:
+        env_status[var] = "Present" if os.getenv(var) else "Missing"
+
+    return jsonify({
+        "status": "healthy",
+        "environment_variables": env_status,
+        "timestamp": time.time()
+    }), 200
+
+
+@app.route('/test-spitch', methods=['GET'])
+def test_spitch():
+    """Test endpoint to verify Spitch API is working"""
+    try:
+        spitch_api_key = os.getenv("SPITCH_API_KEY")
+        if not spitch_api_key:
+            return jsonify({"status": "error", "message": "SPITCH_API_KEY not set"}), 500
+
+        os.environ["SPITCH_API_KEY"] = spitch_api_key
+        client = Spitch()
+
+        # Try a simple translation test
+        test_text = "Hello world"
+        response = client.text.translate(
+            text=test_text,
+            source="en",
+            target="yo"
+        )
+
+        return jsonify({
+            "status": "success",
+            "message": "Spitch API is working",
+            "test_translation": response.text,
+            "original": test_text
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Spitch API test failed: {str(e)}",
+            "error_type": type(e).__name__
+        }), 500
+
+
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
@@ -364,16 +534,20 @@ def webhook():
                                     f"Failed to download audio. Status: {download_response.status_code}")
                                 return jsonify({"status": "error", "message": "Failed to download audio"}), 500
 
-                            # Save the audio file
-                            audio_file = 'voice_note.ogg'
-                            with open(audio_file, 'wb') as f:
-                                f.write(download_response.content)
-                            print("Audio file saved successfully")
+                            # Save the audio file to temporary directory
+                            import tempfile
+                            with tempfile.NamedTemporaryFile(suffix='.ogg', delete=False) as temp_file:
+                                temp_file.write(download_response.content)
+                                audio_file = temp_file.name
+                            print(
+                                f"Audio file saved successfully: {audio_file}")
 
                             # Transcribe with Spitch SDK
                             try:
                                 # Set up Spitch client
                                 spitch_api_key = os.getenv("SPITCH_API_KEY")
+                                print(
+                                    f"Spitch API Key present: {'Yes' if spitch_api_key else 'No'}")
                                 if not spitch_api_key:
                                     print(
                                         "SPITCH_API_KEY is not set in environment variables")
@@ -382,6 +556,7 @@ def webhook():
                                 # Set the API key in environment (required by Spitch SDK)
                                 os.environ["SPITCH_API_KEY"] = spitch_api_key
                                 client = Spitch()
+                                print("Spitch client initialized successfully")
 
                                 # Read the audio file
                                 with open(audio_file, "rb") as f:
@@ -514,6 +689,15 @@ def webhook():
 
                                 transcription = response_message
 
+                                # Clean up the temporary audio file
+                                try:
+                                    os.remove(audio_file)
+                                    print(
+                                        f"Cleaned up audio file: {audio_file}")
+                                except Exception as cleanup_error:
+                                    print(
+                                        f"Warning: Could not clean up audio file {audio_file}: {str(cleanup_error)}")
+
                             except Exception as e:
                                 print(
                                     f"Error with Spitch transcription: {str(e)}")
@@ -582,6 +766,31 @@ def webhook():
                             # Check for language prefix
                             specified_language, cleaned_text, is_preference_setting, is_tts_request = extract_language_prefix(
                                 text_content)
+
+                            # If no language specified but user has a preference, use it
+                            if not specified_language and not is_preference_setting and not is_tts_request:
+                                user_preferred_language = user_language_preferences.get(
+                                    sender)
+                                print(
+                                    f"Checking stored preferences for user {sender}: {user_preferred_language}")
+                                print(
+                                    f"All stored preferences: {user_language_preferences}")
+                                if user_preferred_language:
+                                    specified_language = user_preferred_language
+                                    cleaned_text = text_content  # Use the entire text
+                                    print(
+                                        f"✅ Using stored language preference for user {sender}: {specified_language}")
+                                else:
+                                    print(
+                                        f"❌ No stored language preference found for user {sender}")
+
+                            print(f"🔍 Final processing parameters:")
+                            print(
+                                f"   - specified_language: {specified_language}")
+                            print(f"   - cleaned_text: '{cleaned_text}'")
+                            print(
+                                f"   - is_preference_setting: {is_preference_setting}")
+                            print(f"   - is_tts_request: {is_tts_request}")
 
                             # Handle TTS request
                             if is_tts_request:
@@ -714,13 +923,17 @@ def webhook():
                             # If this is just a language preference setting (e.g., "/igbo")
                             if is_preference_setting and specified_language:
                                 user_language_preferences[sender] = specified_language
+                                save_user_preferences(
+                                    user_language_preferences)  # Persist to file
                                 language_names = {
                                     'yo': 'Yoruba',
                                     'ig': 'Igbo',
                                     'ha': 'Hausa',
                                     'en': 'English'
                                 }
-                                response_message = f"Language preference set to {language_names[specified_language]}. Your next audio messages will be transcribed in {language_names[specified_language]}."
+                                response_message = f"Language preference set to {language_names[specified_language]}. Your next text and audio messages will be processed in {language_names[specified_language]}."
+                                print(
+                                    f"Language preference saved for user {sender}: {language_names[specified_language]}")
 
                                 # Send response via WhatsApp
                                 whatsapp_url = f"https://graph.facebook.com/v22.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
@@ -745,17 +958,19 @@ def webhook():
                                         f"Language preference set for user {sender}: {language_names[specified_language]}")
                                     return jsonify({"status": "success"}), 200
                                 else:
+                                    print(
+                                        f"Failed to send WhatsApp response. Status: {send_response.status_code}")
                                     print(f"Response: {send_response.text}")
                                     print(f"Request URL: {whatsapp_url}")
                                     print(f"Request data: {response_data}")
                                     print(
                                         f"Request headers: Authorization: Bearer {os.getenv('WHATSAPP_API_TOKEN')[:20]}...")
                                     return jsonify({"status": "error", "message": "Failed to send WhatsApp response"}), 500
-                                    print(
-                                        f"Failed to send WhatsApp response. Status: {send_response.status_code}")
 
                             # Set up Spitch client for translation
                             spitch_api_key = os.getenv("SPITCH_API_KEY")
+                            print(
+                                f"Text translation - Spitch API Key present: {'Yes' if spitch_api_key else 'No'}")
                             if not spitch_api_key:
                                 print(
                                     "SPITCH_API_KEY is not set in environment variables")
@@ -763,7 +978,14 @@ def webhook():
 
                             # Set the API key in environment (required by Spitch SDK)
                             os.environ["SPITCH_API_KEY"] = spitch_api_key
-                            client = Spitch()
+                            try:
+                                client = Spitch()
+                                print(
+                                    "Text translation - Spitch client initialized successfully")
+                            except Exception as client_error:
+                                print(
+                                    f"Failed to initialize Spitch client: {str(client_error)}")
+                                return jsonify({"status": "error", "message": f"Spitch client initialization failed: {str(client_error)}"}), 500
 
                             language_names = {
                                 'yo': 'Yoruba',
@@ -779,23 +1001,46 @@ def webhook():
                                 try:
                                     print(
                                         f"User specified {language_names[specified_language]}, translating to English...")
+                                    print(f"Source text: '{cleaned_text}'")
+                                    print(
+                                        f"Source language: {specified_language}")
+                                    print(f"Target language: en")
+
                                     translation_response = client.text.translate(
                                         text=cleaned_text,
                                         source=specified_language,
                                         target="en"
                                     )
+                                    print(f"Translation API response received")
                                     english_translation = translation_response.text.strip()
+                                    print(
+                                        f"Translation result: '{english_translation}'")
 
                                     if english_translation:
-                                        response_message = f"Text ({language_names[specified_language]}): {cleaned_text}\n\nEnglish translation: {english_translation}"
+                                        # Enhance Igbo text with diacritics if it's Igbo
+                                        display_text = cleaned_text
+                                        if specified_language == 'ig':
+                                            display_text = enhance_igbo_text_with_diacritics(
+                                                cleaned_text)
+                                            print(
+                                                f"Enhanced Igbo text: '{display_text}'")
+
+                                        response_message = f"Text ({language_names[specified_language]}): {display_text}\n\nEnglish translation: {english_translation}"
                                         print(
                                             f"Translation from {language_names[specified_language]}: {english_translation}")
                                     else:
-                                        response_message = f"Text ({language_names[specified_language]}): {cleaned_text}\n\nTranslation failed"
+                                        print(
+                                            "Translation returned empty result")
+                                        response_message = f"Text ({language_names[specified_language]}): {cleaned_text}\n\nTranslation failed: Empty result"
 
                                 except Exception as translation_error:
                                     print(
                                         f"Translation from {language_names[specified_language]} failed: {str(translation_error)}")
+                                    print(
+                                        f"Error type: {type(translation_error).__name__}")
+                                    import traceback
+                                    print(
+                                        f"Full traceback: {traceback.format_exc()}")
                                     response_message = f"Text ({language_names[specified_language]}): {cleaned_text}\n\nTranslation error: {str(translation_error)}"
                             else:
                                 # Auto-detect language and translate to English if needed
@@ -805,6 +1050,8 @@ def webhook():
 
                                 # Try to translate from each African language to English
                                 translation_found = False
+                                print(
+                                    f"Auto-detecting language for text: '{cleaned_text}'")
                                 for lang_code in languages_to_try:
                                     try:
                                         print(
@@ -815,18 +1062,33 @@ def webhook():
                                             target="en"
                                         )
                                         english_translation = translation_response.text.strip()
+                                        print(
+                                            f"  {language_names[lang_code]} result: '{english_translation}'")
 
                                         # If translation is significantly different from original, it's likely correct
                                         if english_translation and english_translation.lower() != cleaned_text.lower():
-                                            response_message = f"Text ({language_names[lang_code]}): {cleaned_text}\n\nEnglish translation: {english_translation}"
+                                            # Enhance Igbo text with diacritics if detected as Igbo
+                                            display_text = cleaned_text
+                                            if lang_code == 'ig':
+                                                display_text = enhance_igbo_text_with_diacritics(
+                                                    cleaned_text)
+                                                print(
+                                                    f"Enhanced Igbo text in auto-detection: '{display_text}'")
+
+                                            response_message = f"Text ({language_names[lang_code]}): {display_text}\n\nEnglish translation: {english_translation}"
                                             print(
                                                 f"Translation from {language_names[lang_code]}: {english_translation}")
                                             translation_found = True
                                             break
+                                        else:
+                                            print(
+                                                f"  {language_names[lang_code]}: Translation same as original, trying next language")
 
                                     except Exception as translation_error:
                                         print(
                                             f"Translation from {language_names[lang_code]} failed: {str(translation_error)}")
+                                        print(
+                                            f"  Error type: {type(translation_error).__name__}")
                                         continue
 
                                 # If no translation was found, assume it's already in English
