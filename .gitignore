@@ -13,3 +13,7 @@ user_preferences.json
 
 # Test files
 test*.py
+
+# Railway deployment files (using Heroku instead)
+railway.json
+Aptfile

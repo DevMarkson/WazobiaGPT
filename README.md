@@ -1,6 +1,6 @@
-# WhatsApp Voice Bot with Multi-Language TTS
+# WazobiaGPT - Your Nigerian WhatsApp Speech and Voice Bot with Multilingual Support
 
-A WhatsApp bot that transcribes voice messages and translates between Nigerian languages (Yoruba, Igbo, Hausa) and English using the Spitch API.
+A WhatsApp bot that transcribes and translates voice messages between Nigerian languages (Yoruba, Igbo, Hausa) and English using the Spitch API, with integrated text-to-speech and speech-to-text capabilities for natural, multilingual communication.
 
 ## Features
 
@@ -8,6 +8,12 @@ A WhatsApp bot that transcribes voice messages and translates between Nigerian l
 - **Text-to-Speech**: Convert text to speech with `/speak [Language] [Text]`
 - **Language Support**: Yoruba, Igbo, Hausa, and English
 - **Smart Detection**: Automatic language detection with manual override options
+
+## 🚀 Try It Now!
+
+**WhatsApp Number:** +1 (555) 163-7395
+
+Simply send a WhatsApp message to the number above to start using the bot! No setup required on your end.
 
 ## Usage
 
@@ -79,6 +85,14 @@ git push heroku main
 - **Speech API**: Spitch v1.34.0
 - **Deployment**: Heroku
 - **Audio Processing**: pydub + FFmpeg
+
+## Support This Project
+
+If you find this WhatsApp translation bot useful, please give it a star on GitHub! ⭐
+
+Your support helps others discover this project and motivates continued development.
+
+[⭐ Star this repo](https://github.com/DevMarkson/WazobiaGPT) if you found it helpful!
 
 ---
 
