@@ -10,3 +10,6 @@ user_preferences.json
 
 # Temporary audio files
 .voice_note.ogg
+
+# Test files
+test*.py
