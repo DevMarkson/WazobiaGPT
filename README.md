@@ -9,7 +9,7 @@ A WhatsApp bot that transcribes and translates voice messages between Nigerian l
 - **Language Support**: Yoruba, Igbo, Hausa, and English
 - **Smart Detection**: Automatic language detection with manual override options
 
-## 🚀 Try It Now!
+## Try It Now!
 
 **WhatsApp Number:** +1 (555) 163-7395
 
