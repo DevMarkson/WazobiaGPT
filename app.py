@@ -140,11 +140,11 @@ def enhance_igbo_text_with_diacritics(text):
         'onwa': 'ọnwa',        # moon
         'kpakpando': 'kpakpando',  # star
     }
-    
+
     # Convert to lowercase for matching, but preserve original case
     words = text.split()
     enhanced_words = []
-    
+
     for word in words:
         # Remove punctuation for matching
         clean_word = word.lower().strip('.,!?;:')
@@ -156,7 +156,7 @@ def enhance_igbo_text_with_diacritics(text):
                 enhanced = enhanced.upper()
             elif word.istitle():
                 enhanced = enhanced.capitalize()
-            
+
             # Add back punctuation
             punctuation = ''
             for char in word[::-1]:
@@ -167,7 +167,7 @@ def enhance_igbo_text_with_diacritics(text):
             enhanced_words.append(enhanced + punctuation)
         else:
             enhanced_words.append(word)
-    
+
     return ' '.join(enhanced_words)
 
 
@@ -211,11 +211,11 @@ def enhance_yoruba_text_with_diacritics(text):
         'dide': 'dìde',        # to stand up
         'joko': 'jókòó',       # to sit
     }
-    
+
     # Convert to lowercase for matching, but preserve original case
     words = text.split()
     enhanced_words = []
-    
+
     for word in words:
         # Remove punctuation for matching
         clean_word = word.lower().strip('.,!?;:')
@@ -227,7 +227,7 @@ def enhance_yoruba_text_with_diacritics(text):
                 enhanced = enhanced.upper()
             elif word.istitle():
                 enhanced = enhanced.capitalize()
-            
+
             # Add back punctuation
             punctuation = ''
             for char in word[::-1]:
@@ -238,8 +238,10 @@ def enhance_yoruba_text_with_diacritics(text):
             enhanced_words.append(enhanced + punctuation)
         else:
             enhanced_words.append(word)
-    
+
     return ' '.join(enhanced_words)
+
+
 def get_welcome_message():
     """Generate welcome message for new users"""
     return """🤖 Welcome to Spitch Translator Bot! 
@@ -1111,10 +1113,12 @@ def webhook():
                                 else:
                                     # If no specific language was provided, use user's preference
                                     if not specified_language:
-                                        user_preferred_language = user_language_preferences.get(sender)
+                                        user_preferred_language = user_language_preferences.get(
+                                            sender)
                                         if user_preferred_language:
                                             specified_language = user_preferred_language
-                                            print(f"Using user's language preference for TTS: {specified_language}")
+                                            print(
+                                                f"Using user's language preference for TTS: {specified_language}")
                                         else:
                                             response_message = "Please set a language preference first using /yoruba, /igbo, /hausa, or /english, then try /speak again."
                                             # Send response and return early
@@ -1124,9 +1128,10 @@ def webhook():
                                                 "to": sender,
                                                 "text": {"body": response_message}
                                             }
-                                            requests.post(whatsapp_url, headers={'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}', 'Content-Type': 'application/json'}, json=response_data)
+                                            requests.post(whatsapp_url, headers={
+                                                          'Authorization': f'Bearer {os.getenv("WHATSAPP_API_TOKEN")}', 'Content-Type': 'application/json'}, json=response_data)
                                             return jsonify({"status": "success"}), 200
-                                    
+
                                     # Set up Spitch client
                                     spitch_api_key = os.getenv(
                                         "SPITCH_API_KEY")
