@@ -244,7 +244,7 @@ def enhance_yoruba_text_with_diacritics(text):
 
 def get_welcome_message():
     """Generate welcome message for new users"""
-    return """🤖 Welcome to Spitch Translator Bot! 
+    return """🤖 Welcome to WazobiaGPT! 
 
 I can help you with:
 
@@ -258,10 +258,6 @@ I can help you with:
 • Send voice notes - Auto transcribe & translate
 • /speak [text] - Text to speech in your set language
   Example: /speak Báwo ni (How are you in Yoruba)
-
-💬 TEXT TRANSLATION:
-• Set a language preference first, then send any text
-• I'll automatically translate it for you!
 
 📋 OTHER COMMANDS:
 • /help - Show this help message
