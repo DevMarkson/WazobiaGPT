@@ -1,3 +1,8 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
 # Environment variables
 .env
 
@@ -10,6 +15,9 @@ user_preferences.json
 
 # Temporary audio files
 .voice_note.ogg
+temp_tts_*.wav
+temp_tts_*.mp3
+temp_tts_*.ogg
 
 # Test files
 test*.py
